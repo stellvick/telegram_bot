@@ -1,4 +1,6 @@
 import psycopg2 as pg
+
+from classes.user import User
 from utils.config_utils import ConfigUtils
 from utils.log_utils import LogUtils as lg
 
@@ -47,10 +49,17 @@ class Db:
         return self.get(query)
 
     def find_known_users(self):
-        query = f"SELECT chat_id FROM public.users WHERE chat_id IS NOT NULL"
-        return self.get(query)
+        query = f"SELECT id, chat_id FROM public.users WHERE chat_id IS NOT NULL"
+        return self.get_all(query)
 
     def insert_chat_id(self, chat_id, email):
         query = f"UPDATE public.users SET chat_id = {chat_id} WHERE email = '{email}'"
         self.exec_query(query)
+
+    def consulta(self, user: User):
+        query = (f"SELECT * FROM public.registros pr INNER JOIN public.projetos pp ON pr.projeto_id = pp.id "
+                 f"WHERE pr.user_id = {user.uid} AND pr.dia BETWEEN CURRENT_DATE - INTERVAL '7 days' AND CURRENT_DATE "
+                 f"ORDER BY pr.dia DESC")
+        return self.get_all(query)
+
 

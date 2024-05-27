@@ -2,8 +2,9 @@ import os
 from types import NoneType
 
 import telebot
-from telebot.types import KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
+from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from classes.user import User
 from utils.log_utils import LogUtils
 
 
@@ -12,7 +13,7 @@ class BotHandler:
         # Banco de Dados
         self.db = db
         # Listas
-        self.knownUsers = []
+        self.knownUsers: list[User] = []
         self.commands = {
             'start': 'Bem vindo ao Bot de OS',
             'help': 'Mostra os comandos disponíveis',
@@ -29,18 +30,17 @@ class BotHandler:
 
         # Comandos
         self.bot.message_handler(commands=['start'])(self.command_start)
+        self.bot.message_handler(commands=['help'])(self.command_help)
         self.bot.message_handler(commands=['menu'])(self.main_menu)
-        # self.bot.message_handler(commands=['cry'])(self.sign_handler)
-        # self.bot.message_handler(commands=['category'])(self.cat_list)
 
-        # Menus
-        # self.bot.callback_query_handler(func=lambda call: True)(self.commandshandlebtn)
+        # CallBacks
+        self.bot.callback_query_handler(func=lambda call: True)(self.handle_menu)
 
         # Em caso de não encontrar um comando, ele irá chamar a função echo_all
         self.bot.message_handler(func=lambda msg: True)(self.echo_all)
 
     def echo_all(self, message):
-        self.bot.reply_to(message, message.text)
+        self.bot.reply_to(message, "Não entendi o que você disse!")
 
     def listener(self, messages):
         for m in messages:
@@ -49,7 +49,8 @@ class BotHandler:
 
     def command_start(self, m):
         cid = m.chat.id
-        if cid not in self.knownUsers:
+        user = self.get_user(cid)
+        if user is None:
             self.bot.send_message(cid, "Bem Vindo ao Bot de OS!")
             sent_msg = self.bot.send_message(cid, "Por favor informe o seu email!")
             self.bot.register_next_step_handler(sent_msg, self.email_handler)
@@ -79,55 +80,51 @@ class BotHandler:
         self.bot.send_message(cid, help_text)  # send the generated help page
 
     def main_menu(self, message):
-        reply_markup = InlineKeyboardMarkup()
-        reply_markup.row_width = 1
-        reply_markup.add(InlineKeyboardButton("Novo", callback_data=""))
-        reply_markup.add(InlineKeyboardButton("Consultar", callback_data=""))
-        reply_markup.add(InlineKeyboardButton("Editar", callback_data=""))
-        self.bot.send_message(
-            chat_id=message.chat.id,
-            text="""Escolha uma opção""",
-            reply_markup=reply_markup
-        )
-
-    def cat_list(self, message):
         keyboard = [
-            [
-                KeyboardButton("ACTION 🦹🏼‍♀️", callback_data=""),
-                KeyboardButton("ADVENTURE ⛰", callback_data="")
-            ],
-            [
-                KeyboardButton("BOARD 🧩", callback_data=""),
-                KeyboardButton("CARD 🃏", callback_data="")
-            ],
-            [
-                KeyboardButton("COMPETITIVE 🏆", callback_data=""),
-                KeyboardButton("CASUAL 👨‍👩‍👦‍👦", callback_data="")
-            ],
-            [
-                KeyboardButton("GAMBLE 🎰", callback_data=""),
-                KeyboardButton("PUZZLE 🤔", callback_data="")
-            ],
-            [
-                KeyboardButton("RACING 🏎", callback_data=""),
-                KeyboardButton("SIMULATION 🚜", callback_data="")
-            ],
-            [
-                KeyboardButton("SPORT 🎳", callback_data=""),
-                KeyboardButton("TRIVIA ❔", callback_data="")
-            ],
-            [
-                KeyboardButton("MAIN MENU 🔙", callback_data=self.games_main_menu)
-            ]
+            [InlineKeyboardButton("Novo", callback_data='novo')],
+            [InlineKeyboardButton("Consultar", callback_data='consultar')],
+            [InlineKeyboardButton("Editar", callback_data='editar')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        self.bot.send_message(chat_id=message.chat_id, text="""What Games Do You Like? 😍""",
-                              reply_markup=reply_markup)
+        self.bot.send_message(message.chat.id, "Escolha uma opção...", reply_markup=reply_markup)
+
+    def handle_menu(self, query):
+        try:
+            if query.data == 'novo':
+                self.bot.answer_callback_query(query.id)
+                self.bot.send_message(query.message.chat.id, "Novo")
+            elif query.data == 'consultar':
+                self.bot.answer_callback_query(query.id)
+                res = self.db.consulta(self.get_user(query.message.chat.id))
+                lista = []
+                for item in res:
+                    lista.append(InlineKeyboardButton(item[0], callback_data=item[0]))
+                # self.bot.delete_message(query.message.chat.id, query.message.message_id)
+                # self.bot.send_message(query.message.chat.id, "Ultimas OS", reply_markup=InlineKeyboardMarkup(lista))
+                self.bot.edit_message_reply_markup(query.message.chat.id, query.message.message_id,
+                                                   reply_markup=InlineKeyboardMarkup(lista))
+            elif query.data == 'editar':
+                self.bot.answer_callback_query(query.id)
+                self.bot.send_message(query.message.chat.id, "Editar")
+            else:
+                self.bot.answer_callback_query(query.id, "Ação não encontrada!")
+        except Exception as e:
+            self.logger.log_error(e)
 
     def get_all_users(self):
-        users = self.db.find_known_users()
-        if type(users) is not NoneType:
+        res = self.db.find_known_users()
+        if type(res) is not NoneType:
+            users = []
+            for user in res:
+                new = User(uid=user[0], chat_id=user[1])
+                users.append(new)
             self.knownUsers = users
+
+    def get_user(self, chat_id):
+        for user in self.knownUsers:
+            if user.chat_id == chat_id:
+                return user
+        return None
 
     def run(self):
         self.get_all_users()
@@ -135,3 +132,4 @@ class BotHandler:
 
     def end(self):
         self.bot.stop_polling()
+
