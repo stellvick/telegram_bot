@@ -1,4 +1,6 @@
 import os
+from types import NoneType
+
 import telebot
 from telebot.types import KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -6,15 +8,15 @@ from utils.log_utils import LogUtils
 
 
 class BotHandler:
-    def __init__(self):
+    def __init__(self, db):
+        # Banco de Dados
+        self.db = db
         # Listas
         self.knownUsers = []
-        self.userStep = {}
         self.commands = {
-            'start': 'Get used to the bot',
-            'help': 'Gives you information about the available commands',
-            'sendLongText': 'A test using the \'send_chat_action\' command',
-            'getImage': 'A test using multi-stage messages, custom keyboard, and media sending'
+            'start': 'Bem vindo ao Bot de OS',
+            'help': 'Mostra os comandos disponíveis',
+            'menu': 'Mostra o menu principal'
         }
 
         # self.bot = telebot.TeleBot(os.environ.get('BOT_TOKEN'))
@@ -26,10 +28,10 @@ class BotHandler:
         self.bot.set_update_listener(self.listener)
 
         # Comandos
-        self.bot.message_handler(commands=['start', 'hello'])(self.command_start)
-        self.bot.message_handler(commands=['cry'])(self.sign_handler)
-        self.bot.message_handler(commands=['games'])(self.games_main_menu)
-        self.bot.message_handler(commands=['category'])(self.cat_list)
+        self.bot.message_handler(commands=['start'])(self.command_start)
+        self.bot.message_handler(commands=['menu'])(self.main_menu)
+        # self.bot.message_handler(commands=['cry'])(self.sign_handler)
+        # self.bot.message_handler(commands=['category'])(self.cat_list)
 
         # Menus
         # self.bot.callback_query_handler(func=lambda call: True)(self.commandshandlebtn)
@@ -45,74 +47,46 @@ class BotHandler:
             if m.content_type == 'text':
                 self.logger.log_info(str(m.chat.first_name) + " [" + str(m.chat.id) + "]: " + m.text)
 
-    def get_user_step(self, uid):
-        if uid in self.userStep:
-            return self.userStep[uid]
-        else:
-            self.knownUsers.append(uid)
-            self.userStep[uid] = 0
-            self.logger.log_info("New user detected, who hasn't used \"/start\" yet")
-            return 0
-
     def command_start(self, m):
         cid = m.chat.id
-        if cid not in self.knownUsers:  # if user hasn't used the "/start" command yet:
-            self.knownUsers.append(cid)  # save user id, so you could brodcast messages to all users of this bot later
-            self.userStep[cid] = 0  # save user id and his current "command level", so he can use the "/getImage" comm
-            self.bot.send_message(cid, "Hello, stranger, let me scan you...")
-            self.bot.send_message(cid, "Scanning complete, I know you now")
-            self.command_help(m)  # show the new user the help page
+        if cid not in self.knownUsers:
+            self.bot.send_message(cid, "Bem Vindo ao Bot de OS!")
+            sent_msg = self.bot.send_message(cid, "Por favor informe o seu email!")
+            self.bot.register_next_step_handler(sent_msg, self.email_handler)
         else:
-            self.bot.send_message(cid, "I already know you, no need for me to scan you again!")
+            self.bot.send_message(cid, "Bem Vindo de Volta!")
+            self.main_menu(m)
+
+    def email_handler(self, message):
+        email = message.text
+        user = self.db.find_user(email)
+        if user is None:
+            self.bot.send_message(message.chat.id, "Email não cadastrado!")
+            sent_msg = self.bot.send_message(message.chat.id, "Por favor informe um email correto!")
+            self.bot.register_next_step_handler(sent_msg, self.email_handler)
+        else:
+            self.bot.send_message(message.chat.id, "Aguarde!!!")
+            self.db.insert_chat_id(message.chat.id, email)
+            self.get_all_users()
+            self.main_menu(message)
 
     def command_help(self, m):
         cid = m.chat.id
-        help_text = "The following commands are available: \n"
-        for key in self.commands:  # generate help text out of the commands dictionary defined at the top
+        help_text = "Os comandos disponíveis são:\n"
+        for key in self.commands:
             help_text += "/" + key + ": "
             help_text += self.commands[key] + "\n"
         self.bot.send_message(cid, help_text)  # send the generated help page
 
-    def sign_handler(self, message):
-        text = ("To shutdown \nChoose one: *Aries*, *Taurus*, *Gemini*, *Cancer,* *Leo*, *Virgo*, *Libra*, *Scorpio*, "
-                "*Sagittarius*, *Capricorn*, *Aquarius*, and *Pisces*.")
-        sent_msg = self.bot.send_message(message.chat.id, text, parse_mode="Markdown")
-        self.bot.register_next_step_handler(sent_msg, self.day_handler)
-
-    def day_handler(self, message):
-        sign = message.text
-        text = ("What day do you want to know?\nChoose one: *TODAY*, *TOMORROW*, *YESTERDAY*, or a date in format "
-                "YYYY-MM-DD.")
-        sent_msg = self.bot.send_message(
-            message.chat.id, text, parse_mode="Markdown")
-        self.bot.register_next_step_handler(
-            sent_msg, self.end, sign.capitalize())
-
-    def games_main_menu(self, message):
-        keyboard = [
-            [
-                KeyboardButton("Play Solo 👤", callback_data=""),
-                KeyboardButton("Play With Friends 👥", callback_data="")
-            ],
-            [
-                KeyboardButton("CATEGORIES 🎮", callback_data="cat_button"),
-                KeyboardButton("TRENDING LIST ⚡️", callback_data="trend_button")
-            ],
-            [
-                KeyboardButton("LAST PLAYED GAMES 🔄", callback_data="prev_played_button"),
-                KeyboardButton("JOIN CHANNEL 🤑", url="")
-            ],
-            [
-                KeyboardButton("CONTACT SUPPORT 🛠", callback_data="")
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        # Sending the message with the custom keyboard
+    def main_menu(self, message):
+        reply_markup = InlineKeyboardMarkup()
+        reply_markup.row_width = 1
+        reply_markup.add(InlineKeyboardButton("Novo", callback_data=""))
+        reply_markup.add(InlineKeyboardButton("Consultar", callback_data=""))
+        reply_markup.add(InlineKeyboardButton("Editar", callback_data=""))
         self.bot.send_message(
             chat_id=message.chat.id,
-            text="""Alright 🏁 
-                    How Would You Like to Begin: """,
+            text="""Escolha uma opção""",
             reply_markup=reply_markup
         )
 
@@ -150,7 +124,13 @@ class BotHandler:
         self.bot.send_message(chat_id=message.chat_id, text="""What Games Do You Like? 😍""",
                               reply_markup=reply_markup)
 
+    def get_all_users(self):
+        users = self.db.find_known_users()
+        if type(users) is not NoneType:
+            self.knownUsers = users
+
     def run(self):
+        self.get_all_users()
         self.bot.infinity_polling()
 
     def end(self):

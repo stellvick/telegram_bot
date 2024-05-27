@@ -1,5 +1,11 @@
 from classes.bot_handler import BotHandler
+from utils.config_utils import ConfigUtils
+from classes.db import Db
 
-bot = BotHandler()
+cu = ConfigUtils()
+cu.load_config()
+db = Db()
+db.start()
+bot = BotHandler(db)
 bot.run()
 
