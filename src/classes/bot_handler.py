@@ -6,6 +6,7 @@ from types import NoneType
 from classes.os import Os
 
 import telebot
+import regex as re
 
 
 class BotHandler:
@@ -108,19 +109,60 @@ class BotHandler:
                 self.bot.answer_callback_query(call_id)
                 self.bot.delete_message(chat_id=chat_id, message_id=message_id)
                 self.main_menu(call.message)
+            elif call.data == 'salvar':
+                self.bot.answer_callback_query(call_id)
+                user = self.get_user(chat_id)
+                try:
+                    self.db.insert_os(user.os)
+                    self.bot.send_message(chat_id, "OS Salva com sucesso!")
+                except Exception as e:
+                    self.logger.log_error(e)
+                    self.bot.send_message(chat_id, "Erro ao salvar a OS!")
             elif call.data.startswith('campo'):
                 self.bot.answer_callback_query(call_id)
                 campo = call.data.split('-')[1]
                 user = self.get_user(chat_id)
                 user.action = campo
                 self.update_user(user, chat_id)
-                message = f"Por favor digite o conteudo do campo {campo}:"
-                self.bot.send_message(chat_id, message)
-                self.bot.register_next_step_handler(call.message, self.form_handler)
+                if campo == "Conteudo":
+                    message = f"Por favor digite o conteudo do campo {campo}:" \
+                              f"\n\n" \
+                              f"Você pode utilzar algumas tags para formatar o documento.\n" \
+                              f"Exemplo: <b>Texto em negrito</b>\n\n" \
+                              f"Para mais informações acesse: https://core.telegram.org/bots/api#html-style"
+                    self.bot.register_next_step_handler(
+                        self.bot.send_message(
+                            chat_id,
+                            message,
+                            disable_web_page_preview=True
+                        ),
+                        self.form_handler
+                    )
+                elif campo == "Status":
+                    message = f"Por favor digite o status da OS ele deve ser um dos seguintes:" \
+                              f"\n\n" \
+                              f"Planejado\n" \
+                              f"Executado\n" \
+                              f"Cancelado"
+                    self.bot.register_next_step_handler(
+                                                        self.bot.send_message(
+                                                            chat_id,
+                                                            message,
+                                                        ),
+                                                        self.form_handler
+                    )
+                else:
+                    message = f"Por favor digite o conteudo do campo {campo}:"
+                    self.bot.register_next_step_handler(
+                                                        self.bot.send_message(
+                                                            chat_id,
+                                                            message,
+                                                        ),
+                                                        self.form_handler
+                    )
             else:
                 self.bot.answer_callback_query(call_id, "Ação não encontrada!")
         except Exception as e:
-            print(e)
             self.logger.log_error(e)
 
     def form_handler(self, message):
@@ -134,33 +176,58 @@ class BotHandler:
             elif user.action == "RDV":
                 user.os.rdv = message.text
             elif user.action == "Status":
-                user.os.status = message.text
+                if self.validate_status(message.text, chat_id):
+                    user.os.status = message.text
             elif user.action == "Entrada 1":
-                user.os.entrada = message.text
+                if self.validate_time(message.text, chat_id):
+                    user.os.entrada = message.text
             elif user.action == "Saída 1":
-                user.os.almoco_inicio = message.text
+                if self.validate_time(message.text, chat_id):
+                    user.os.almoco_inicio = message.text
             elif user.action == "Entrada 2":
-                user.os.almoco_fim = message.text
+                if self.validate_time(message.text, chat_id):
+                    user.os.almoco_fim = message.text
             elif user.action == "Saída 2":
-                user.os.saida = message.text
+                if self.validate_time(message.text, chat_id):
+                    user.os.saida = message.text
             self.update_user(user, chat_id)
-            # self.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
+            self.bot.delete_message(chat_id=chat_id, message_id=message.message_id)
             self.bot.edit_message_text(self.create_os_html(user.os), chat_id=chat_id, message_id=user.active,
-                                       parse_mode='HTML')
+                                       parse_mode='HTML', reply_markup=self.new_menu())
         except Exception as e:
-            print(e)
             self.logger.log_error(e)
 
-    def create_project(self, call, call_id, chat_id, message_id):
-        self.bot.answer_callback_query(call_id)
-        projeto = call.data.split('??')[1]
-        os = Os()
-        os.codigo = projeto
-        user = self.get_user(chat_id)
-        user.active = message_id
-        user.action = "start"
-        user.os = os
-        self.update_user(user, chat_id)
+    def validate_status(self, status: str, chat_id: int):
+        ret = True
+        if status not in ["Planejado", "Executado", "Cancelado"]:
+            ret = False
+        if ret:
+            msg = "Status inválido!\n" \
+                  "Digite novamente um status válido.\n" \
+                  "Os status válidos são:\n" \
+                  "Planejado\n" \
+                  "Executado\n" \
+                  "Cancelado"
+            self.bot.register_next_step_handler(self.bot.send_message(chat_id, msg), self.form_handler)
+        return ret
+
+    def validate_time(self, time: str, chat_id: int):
+        ret = True
+        if len(time) != 5:
+            ret = False
+        regex = r"([01]?[0-9]|2[0-3]):[0-5][0-9]"
+        if not re.match(regex, time):
+            ret = False
+        if ret:
+            msg = "Formato de hora inválido!\n" \
+                  "Digite novamente no formato correto.\n" \
+                  "<b>Exemplo:<b/> 00:00"
+            self.bot.register_next_step_handler(self.bot.send_message(chat_id, msg, parse_mode="HTML"),
+                                                self.form_handler)
+        return ret
+
+    @staticmethod
+    def new_menu():
         keyboard = [
             [
                 InlineKeyboardButton("Entrada 1", callback_data="campo-Entrada 1"),
@@ -184,6 +251,19 @@ class BotHandler:
             ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
+        return reply_markup
+
+    def create_project(self, call, call_id, chat_id, message_id):
+        self.bot.answer_callback_query(call_id)
+        projeto = call.data.split('??')[1]
+        os = Os()
+        os.codigo = projeto
+        user = self.get_user(chat_id)
+        user.active = message_id
+        user.action = "start"
+        user.os = os
+        self.update_user(user, chat_id)
+        reply_markup = self.new_menu()
         self.bot.edit_message_text(self.create_os_html(os), chat_id=chat_id, message_id=message_id,
                                    reply_markup=reply_markup, parse_mode='HTML')
 

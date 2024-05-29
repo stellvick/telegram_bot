@@ -1,6 +1,7 @@
 import logging
 import logging.handlers
 import os
+import time
 
 from utils.folder_utils import FolderUtils
 
@@ -33,7 +34,7 @@ class LogUtils:
         self.root.warning(message)
 
     def log_error(self, message):
-        self.root.error(message)
+        self.root.error(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - {message}")
 
     def log_critical(self, message):
         self.root.critical(message)
